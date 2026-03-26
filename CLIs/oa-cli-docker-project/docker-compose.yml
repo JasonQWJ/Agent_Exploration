@@ -1,0 +1,15 @@
+services:
+  oa-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oa-cli-dashboard
+    ports:
+      - "3460:3460"
+    volumes:
+      - /Users/jason/.openclaw:/data/openclaw:ro
+      - ./data:/work/data
+      - ./pipelines:/work/pipelines
+      - ./config.yaml:/work/config.yaml
+    working_dir: /work
+    restart: unless-stopped

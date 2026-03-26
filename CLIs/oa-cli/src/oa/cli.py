@@ -181,9 +181,11 @@ def collect(goal: str | None, date: str | None, config_path: str):
 
 @main.command()
 @click.option("--port", "-p", default=3460, help="Port to serve on")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="Host/interface to bind (use 0.0.0.0 for Docker/LAN access)")
 @click.option("--config", "-c", "config_path", default="config.yaml", help="Config file path")
 @click.option("--no-open", is_flag=True, help="Don't open browser automatically")
-def serve(port: int, config_path: str, no_open: bool):
+def serve(port: int, host: str, config_path: str, no_open: bool):
     """Start the OA dashboard in your browser."""
     from .server import serve as start_server
 
@@ -192,7 +194,7 @@ def serve(port: int, config_path: str, no_open: bool):
         console.print("[red]Error:[/] config.yaml not found. Run `oa init` first.")
         raise SystemExit(1)
 
-    start_server(port=port, config_path=config_path, open_browser=not no_open)
+    start_server(port=port, host=host, config_path=config_path, open_browser=not no_open)
 
 
 # ━━━ oa status ━━━

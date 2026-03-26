@@ -77,42 +77,55 @@ class TeamHealthPipeline(Pipeline):
 
     def _count_agent_sessions(self, openclaw_home: Path, agent_id: str,
                               date: str) -> int:
-        """Count sessions for an agent on a given date."""
-        sessions_dir = openclaw_home / "sessions"
-        if not sessions_dir.exists():
-            return 0
-
+        """Count sessions for an agent on a given date across known layouts."""
         count = 0
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
 
-        for path in sessions_dir.iterdir():
-            if not path.is_file():
-                continue
-            # Match agent ID in session filename (pattern: agent:<id>:...)
-            if f"agent:{agent_id}:" not in path.name:
-                continue
-            try:
-                mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
-                if mtime == target_date:
-                    count += 1
-            except OSError:
-                continue
+        # Layout 1: ~/.openclaw/sessions/agent:<id>:...
+        sessions_dir = openclaw_home / "sessions"
+        if sessions_dir.exists():
+            for path in sessions_dir.iterdir():
+                if not path.is_file():
+                    continue
+                if f"agent:{agent_id}:" not in path.name:
+                    continue
+                try:
+                    mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
+                    if mtime == target_date:
+                        count += 1
+                except OSError:
+                    continue
+
+        # Layout 2: ~/.openclaw/agents/<id>/sessions/*
+        agent_sessions_dir = openclaw_home / "agents" / agent_id / "sessions"
+        if agent_sessions_dir.exists():
+            for path in agent_sessions_dir.iterdir():
+                if not path.is_file():
+                    continue
+                try:
+                    mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
+                    if mtime == target_date:
+                        count += 1
+                except OSError:
+                    continue
 
         return count
 
     def _check_memory_logged(self, openclaw_home: Path, agent_id: str,
                              date: str) -> bool:
         """Check if an agent has a memory file for the given date."""
-        # Check common memory file patterns
-        # Pattern 1: Agent workspace memory/YYYY-MM-DD.md
-        # We check under the openclaw home and common workspace patterns
         possible_paths = [
             openclaw_home / "agents" / agent_id / "memory" / f"{date}.md",
             openclaw_home / "workspaces" / agent_id / "memory" / f"{date}.md",
+            openclaw_home / "workspace" / "memory" / f"{date}.md",
+            openclaw_home / "workspace" / "memory" / f"{date}-*.md",
         ]
 
         for path in possible_paths:
-            if path.exists():
+            if "*" in path.name:
+                if list(path.parent.glob(path.name)):
+                    return True
+            elif path.exists():
                 return True
 
         return False

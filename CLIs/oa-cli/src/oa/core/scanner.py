@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -80,55 +81,68 @@ class OpenClawScanner:
         return result
 
     def _scan_agents(self) -> list[AgentInfo]:
-        """Detect agents from session directories and config."""
+        """Detect agents from session directories and agent subdirectories."""
         agents: dict[str, AgentInfo] = {}
 
-        # Try reading from session directories
-        # OpenClaw stores sessions as agent:<id>:* patterns
+        def upsert_agent(agent_id: str, mtime_ts: float | None = None) -> None:
+            if not agent_id:
+                return
+            mtime_iso = None
+            if mtime_ts is not None:
+                mtime_iso = datetime.fromtimestamp(mtime_ts).isoformat()
+            existing = agents.get(agent_id)
+            if not existing:
+                agents[agent_id] = AgentInfo(id=agent_id, name=agent_id.upper(), last_active=mtime_iso)
+                return
+            if mtime_iso and (not existing.last_active or mtime_iso > existing.last_active):
+                existing.last_active = mtime_iso
+
+        # Pattern 1: top-level session files named like agent:<id>:...
         sessions_dir = self.home / "sessions"
         if sessions_dir.exists():
             for path in sessions_dir.iterdir():
-                if path.is_file() and path.suffix == ".json":
-                    try:
-                        name = path.stem
-                        # Extract agent ID from session key pattern: agent:<id>:...
-                        if "agent:" in name:
-                            parts = name.split(":")
-                            if len(parts) >= 2:
-                                agent_id = parts[1]
-                                if agent_id not in agents:
-                                    mtime = datetime.fromtimestamp(path.stat().st_mtime)
-                                    agents[agent_id] = AgentInfo(
-                                        id=agent_id,
-                                        name=agent_id.upper(),
-                                        last_active=mtime.isoformat(),
-                                    )
-                                else:
-                                    # Update last_active if more recent
-                                    mtime = datetime.fromtimestamp(path.stat().st_mtime)
-                                    existing = agents[agent_id]
-                                    if existing.last_active and mtime.isoformat() > existing.last_active:
-                                        existing.last_active = mtime.isoformat()
-                    except (OSError, ValueError):
-                        continue
+                if not path.is_file():
+                    continue
+                try:
+                    match = re.search(r"agent:([^:]+):", path.name)
+                    if match:
+                        upsert_agent(match.group(1), path.stat().st_mtime)
+                except OSError:
+                    continue
 
-        # Also try agent config directory
+        # Pattern 2: OpenClaw agent directories: ~/.openclaw/agents/<id>/sessions/*
         agents_dir = self.home / "agents"
         if agents_dir.exists():
             for path in agents_dir.iterdir():
-                if path.is_dir():
-                    agent_id = path.name
-                    if agent_id not in agents:
-                        agents[agent_id] = AgentInfo(
-                            id=agent_id,
-                            name=agent_id.upper(),
-                        )
+                if not path.is_dir():
+                    continue
+                agent_id = path.name
+                upsert_agent(agent_id)
+                sessions_subdir = path / "sessions"
+                if sessions_subdir.exists():
+                    for session_file in sessions_subdir.iterdir():
+                        if not session_file.is_file():
+                            continue
+                        try:
+                            upsert_agent(agent_id, session_file.stat().st_mtime)
+                        except OSError:
+                            continue
 
         return sorted(agents.values(), key=lambda a: a.id)
 
     def _count_sessions(self) -> int:
-        """Count total session files."""
+        """Count total session files across known OpenClaw layouts."""
+        count = 0
+
         sessions_dir = self.home / "sessions"
-        if not sessions_dir.exists():
-            return 0
-        return sum(1 for f in sessions_dir.iterdir() if f.is_file())
+        if sessions_dir.exists():
+            count += sum(1 for f in sessions_dir.iterdir() if f.is_file())
+
+        agents_dir = self.home / "agents"
+        if agents_dir.exists():
+            for agent_dir in agents_dir.iterdir():
+                sessions_subdir = agent_dir / "sessions"
+                if agent_dir.is_dir() and sessions_subdir.exists():
+                    count += sum(1 for f in sessions_subdir.iterdir() if f.is_file())
+
+        return count

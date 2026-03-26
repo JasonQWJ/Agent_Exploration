@@ -81,3 +81,19 @@ class TestScanner:
             scanner = OpenClawScanner(openclaw_home=oc_home)
             result = scanner.scan()
             assert result.session_count == 5
+
+    def test_scan_agents_from_agent_session_subdirs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            oc_home = Path(tmpdir)
+            agent_sessions = oc_home / "agents" / "main" / "sessions"
+            agent_sessions.mkdir(parents=True)
+            (agent_sessions / "abc.jsonl").write_text("{}")
+
+            scanner = OpenClawScanner(openclaw_home=oc_home)
+            result = scanner.scan()
+
+            agent_ids = [a.id for a in result.agents]
+            assert "main" in agent_ids
+            assert result.session_count == 1
+            main_agent = next(a for a in result.agents if a.id == "main")
+            assert main_agent.last_active is not None

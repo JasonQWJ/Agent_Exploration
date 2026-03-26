@@ -112,3 +112,22 @@ class TestTeamHealthPipeline:
 
             active = next(m for m in metrics if m.name == "active_agent_count")
             assert active.value >= 1
+
+    def test_with_agent_subdir_sessions_and_workspace_memory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = _make_project(tmpdir)
+            agent_sessions = config.openclaw_home / "agents" / "researcher" / "sessions"
+            agent_sessions.mkdir(parents=True)
+            (agent_sessions / "abc.jsonl").write_text("{}")
+            workspace_memory = config.openclaw_home / "workspace" / "memory"
+            workspace_memory.mkdir(parents=True)
+            today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+            (workspace_memory / f"{today}.md").write_text("note")
+
+            pipeline = TeamHealthPipeline()
+            metrics = pipeline.collect(today, config)
+
+            active = next(m for m in metrics if m.name == "active_agent_count")
+            memory = next(m for m in metrics if m.name == "memory_discipline")
+            assert active.value >= 1
+            assert memory.value >= 50

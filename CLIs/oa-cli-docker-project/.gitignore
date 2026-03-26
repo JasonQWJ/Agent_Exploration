@@ -1,0 +1,4 @@
+dist/*.whl
+data/*.db
+data/*.db-*
+__pycache__/

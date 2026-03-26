@@ -32,6 +32,7 @@ class OAHandler(SimpleHTTPRequestHandler):
 
     config_path: str = "config.yaml"
     _config_cache: dict | None = None
+    _config_dir: Path = Path.cwd()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -98,6 +99,7 @@ class OAHandler(SimpleHTTPRequestHandler):
         if OAHandler._config_cache is not None:
             return OAHandler._config_cache
         config_path = Path(OAHandler.config_path)
+        OAHandler._config_dir = config_path.resolve().parent if config_path.exists() else Path.cwd()
         if config_path.exists():
             with open(config_path) as f:
                 OAHandler._config_cache = yaml.safe_load(f) or {}
@@ -107,8 +109,10 @@ class OAHandler(SimpleHTTPRequestHandler):
 
     def _get_db(self) -> sqlite3.Connection:
         config = self._get_config()
-        db_path = config.get("db_path", "data/monitor.db")
-        db = sqlite3.connect(db_path)
+        db_path = Path(config.get("db_path", "data/monitor.db"))
+        if not db_path.is_absolute():
+            db_path = OAHandler._config_dir / db_path
+        db = sqlite3.connect(str(db_path))
         db.row_factory = sqlite3.Row
         return db
 
@@ -309,17 +313,23 @@ def _get_last_collected(db: sqlite3.Connection) -> str | None:
     return row["d"] if row else None
 
 
-def serve(port: int = 3460, config_path: str = "config.yaml", open_browser: bool = True) -> None:
+def serve(
+    port: int = 3460,
+    config_path: str = "config.yaml",
+    open_browser: bool = True,
+    host: str = "127.0.0.1",
+) -> None:
     """Start the OA dashboard server."""
     OAHandler.config_path = config_path
     OAHandler._config_cache = None  # reset cache
+    OAHandler._config_dir = Path(config_path).resolve().parent if Path(config_path).exists() else Path.cwd()
 
     if not DASHBOARD_DIR.exists() or not (DASHBOARD_DIR / "index.html").exists():
         print("Error: Dashboard files not found. Package may be incomplete.")
         return
 
     try:
-        server = HTTPServer(("127.0.0.1", port), OAHandler)
+        server = HTTPServer((host, port), OAHandler)
     except OSError as e:
         if "Address already in use" in str(e):
             print(f"Error: Port {port} is already in use.")
@@ -327,7 +337,8 @@ def serve(port: int = 3460, config_path: str = "config.yaml", open_browser: bool
             print(f"  Or:  lsof -i :{port} | grep LISTEN  (to find the process)")
             return
         raise
-    url = f"http://localhost:{port}"
+    public_host = "localhost" if host in ("127.0.0.1", "0.0.0.0") else host
+    url = f"http://{public_host}:{port}"
 
     print(f"\n🖥️  OA Dashboard running at {url}\n")
 

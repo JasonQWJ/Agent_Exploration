@@ -51,9 +51,12 @@ class CronReliabilityPipeline(Pipeline):
                 for job in enabled_jobs:
                     job_id = job.get("id", "unknown")
                     job_name = job.get("name", job_id)
-                    runs = self._read_runs_jsonl(runs_dir, job_id, date)
+                    tz_str = job.get("schedule", {}).get("tz", "UTC")
+                    runs = self._read_runs_jsonl(runs_dir, job_id, date, tz_str)
 
-                    success = sum(1 for r in runs if r.get("status") == "completed")
+                    # OpenClaw JSONL format:
+                    # {"ts": 1774540961766, "jobId": "...", "action": "finished", "status": "ok", "runAtMs": 1774540828701, ...}
+                    success = sum(1 for r in runs if r.get("status") == "ok")
                     failed = sum(1 for r in runs if r.get("status") in ("failed", "error"))
                     total = len(runs)
 
@@ -90,8 +93,9 @@ class CronReliabilityPipeline(Pipeline):
             breakdown={"per_job": per_job, "total_runs": total_runs},
         )]
 
-    def _read_runs_jsonl(self, runs_dir: Path, job_id: str, date: str) -> list[dict]:
+    def _read_runs_jsonl(self, runs_dir: Path, job_id: str, date_str: str, tz_str: str = "UTC") -> list[dict]:
         """Read JSONL run entries for a job, filtered to a specific date."""
+        from zoneinfo import ZoneInfo
         jsonl_file = runs_dir / f"{job_id}.jsonl"
         if not jsonl_file.exists():
             return []
@@ -105,11 +109,19 @@ class CronReliabilityPipeline(Pipeline):
                         continue
                     try:
                         entry = json.loads(line)
-                        # Filter by date — check startedAt or completedAt
-                        started = entry.get("startedAt", "")
-                        if started.startswith(date):
+                        if entry.get("action") != "finished":
+                            continue
+
+                        # Filter by date — check runAtMs (millisecond timestamp)
+                        run_at_ms = entry.get("runAtMs") or entry.get("ts")
+                        if not run_at_ms:
+                            continue
+                        
+                        # Convert ms timestamp to the target timezone's date (YYYY-MM-DD)
+                        dt = datetime.fromtimestamp(run_at_ms / 1000.0, tz=ZoneInfo(tz_str))
+                        if dt.strftime("%Y-%m-%d") == date_str:
                             runs.append(entry)
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, ValueError, TypeError):
                         continue
         except OSError:
             pass

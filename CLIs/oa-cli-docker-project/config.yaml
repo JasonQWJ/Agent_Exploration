@@ -6,6 +6,12 @@ db_path: data/monitor.db
 agents:
 - id: codex
   name: CODEX
+- id: data_agent
+  name: DATA_AGENT
+- id: detect_agent
+  name: DETECT_AGENT
+- id: fix_agent
+  name: FIX_AGENT
 - id: main
   name: MAIN
 goals:
@@ -23,8 +29,8 @@ goals:
   metrics:
   - name: active_agent_count
     unit: count
-    healthy: 1
-    warning: 1
+    healthy: 3
+    warning: 2
   - name: memory_discipline
     unit: '%'
     healthy: 80

@@ -14,6 +14,16 @@ config.save(Path('/work/config.yaml'))
 print('Detected agents:', ', '.join(a.id for a in config.agents) or '(none)')
 PY
 oa collect --config /work/config.yaml
+
+# Start background collector loop (every 4 hours)
+(
+  while true; do
+    sleep 14400
+    echo "$(date) - Running scheduled collection..."
+    oa collect --config /work/config.yaml
+  done
+) &
+
 python - <<'PY'
 from pathlib import Path
 p = Path('/usr/local/lib/python3.11/site-packages/oa/server.py')

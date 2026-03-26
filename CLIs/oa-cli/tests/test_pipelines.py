@@ -67,12 +67,14 @@ class TestCronReliabilityPipeline:
             }
             (cron_dir / "jobs.json").write_text(json.dumps(jobs))
 
-            # Create JSONL runs
+            # Create JSONL runs with real format: ts (ms), runAtMs (ms), action, status
+            # 2026-03-15 approx 1773532800000 ms
+            base_ts = 1773532800000 
             runs_dir = cron_dir / "runs"
             with open(runs_dir / "test-job.jsonl", "w") as f:
-                f.write(json.dumps({"jobId": "test-job", "runId": "r1", "startedAt": "2026-03-15T07:00:00", "status": "completed"}) + "\n")
-                f.write(json.dumps({"jobId": "test-job", "runId": "r2", "startedAt": "2026-03-15T12:00:00", "status": "completed"}) + "\n")
-                f.write(json.dumps({"jobId": "test-job", "runId": "r3", "startedAt": "2026-03-15T19:00:00", "status": "failed"}) + "\n")
+                f.write(json.dumps({"ts": base_ts + 3600000, "runAtMs": base_ts, "action": "finished", "status": "ok"}) + "\n")
+                f.write(json.dumps({"ts": base_ts + 7200000, "runAtMs": base_ts + 3600000, "action": "finished", "status": "ok"}) + "\n")
+                f.write(json.dumps({"ts": base_ts + 10800000, "runAtMs": base_ts + 7200000, "action": "finished", "status": "error"}) + "\n")
 
             pipeline = CronReliabilityPipeline()
             metrics = pipeline.collect("2026-03-15", config)

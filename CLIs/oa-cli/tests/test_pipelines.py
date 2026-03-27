@@ -24,7 +24,12 @@ def _make_project(tmpdir: str) -> ProjectConfig:
 
     create_schema(db_path)
 
-    config = ProjectConfig(openclaw_home=oc_home, db_path=db_path)
+    config = ProjectConfig(
+        openclaw_home=oc_home,
+        # Isolated fake clawteam_home so tests don't read real ~/.clawteam
+        clawteam_home=Path("/tmp/nonexistent-clawteam-pipeline-test"),
+        db_path=db_path,
+    )
     config.agents = [
         AgentConfig(id="researcher", name="Researcher"),
         AgentConfig(id="writer", name="Writer"),

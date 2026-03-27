@@ -5,10 +5,15 @@ from pathlib import Path
 
 from oa.core.scanner import OpenClawScanner
 
+_NO_CLAWTEAM = Path("/tmp/nonexistent-clawteam-test")
+
 
 class TestScanner:
     def test_scan_missing_directory(self):
-        scanner = OpenClawScanner(openclaw_home=Path("/tmp/nonexistent-oa-test"))
+        scanner = OpenClawScanner(
+            openclaw_home=Path("/tmp/nonexistent-oa-test"),
+            clawteam_home=_NO_CLAWTEAM,
+        )
         result = scanner.scan()
         assert result.found is False
         assert len(result.agents) == 0
@@ -16,7 +21,10 @@ class TestScanner:
 
     def test_scan_empty_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            scanner = OpenClawScanner(openclaw_home=Path(tmpdir))
+            scanner = OpenClawScanner(
+                openclaw_home=Path(tmpdir),
+                clawteam_home=_NO_CLAWTEAM,
+            )
             result = scanner.scan()
             assert result.found is True
             assert len(result.agents) == 0
@@ -46,7 +54,7 @@ class TestScanner:
             }
             (cron_dir / "jobs.json").write_text(json.dumps(jobs))
 
-            scanner = OpenClawScanner(openclaw_home=oc_home)
+            scanner = OpenClawScanner(openclaw_home=oc_home, clawteam_home=_NO_CLAWTEAM)
             result = scanner.scan()
 
             assert len(result.cron_jobs) == 2
@@ -61,7 +69,7 @@ class TestScanner:
             (agents_dir / "researcher").mkdir(parents=True)
             (agents_dir / "writer").mkdir(parents=True)
 
-            scanner = OpenClawScanner(openclaw_home=oc_home)
+            scanner = OpenClawScanner(openclaw_home=oc_home, clawteam_home=_NO_CLAWTEAM)
             result = scanner.scan()
 
             agent_ids = [a.id for a in result.agents]
@@ -74,11 +82,10 @@ class TestScanner:
             sessions_dir = oc_home / "sessions"
             sessions_dir.mkdir()
 
-            # Create some fake session files
             for i in range(5):
                 (sessions_dir / f"session-{i}.json").write_text("{}")
 
-            scanner = OpenClawScanner(openclaw_home=oc_home)
+            scanner = OpenClawScanner(openclaw_home=oc_home, clawteam_home=_NO_CLAWTEAM)
             result = scanner.scan()
             assert result.session_count == 5
 
@@ -89,7 +96,7 @@ class TestScanner:
             agent_sessions.mkdir(parents=True)
             (agent_sessions / "abc.jsonl").write_text("{}")
 
-            scanner = OpenClawScanner(openclaw_home=oc_home)
+            scanner = OpenClawScanner(openclaw_home=oc_home, clawteam_home=_NO_CLAWTEAM)
             result = scanner.scan()
 
             agent_ids = [a.id for a in result.agents]
@@ -97,3 +104,72 @@ class TestScanner:
             assert result.session_count == 1
             main_agent = next(a for a in result.agents if a.id == "main")
             assert main_agent.last_active is not None
+
+    # ── ClawTeam-specific tests ──────────────────────────────────────────
+
+    def test_clawteam_not_found(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            scanner = OpenClawScanner(
+                openclaw_home=Path(tmpdir),
+                clawteam_home=_NO_CLAWTEAM,
+            )
+            result = scanner.scan()
+            assert result.clawteam_found is False
+
+    def test_clawteam_agents_from_tasks(self):
+        with tempfile.TemporaryDirectory() as oc_dir, \
+             tempfile.TemporaryDirectory() as ct_dir:
+            ct_home = Path(ct_dir)
+            tasks_dir = ct_home / "tasks" / "my-task"
+            tasks_dir.mkdir(parents=True)
+
+            task_data = {
+                "id": "abc123",
+                "subject": "Do something",
+                "status": "in_progress",
+                "owner": "coder",
+                "lockedBy": "agent",
+            }
+            (tasks_dir / "task-abc123.json").write_text(json.dumps(task_data))
+
+            scanner = OpenClawScanner(openclaw_home=Path(oc_dir), clawteam_home=ct_home)
+            result = scanner.scan()
+
+            assert result.clawteam_found is True
+            agent_ids = [a.id for a in result.agents]
+            assert "coder" in agent_ids
+
+    def test_clawteam_sessions_counted(self):
+        with tempfile.TemporaryDirectory() as oc_dir, \
+             tempfile.TemporaryDirectory() as ct_dir:
+            ct_home = Path(ct_dir)
+            task_sessions = ct_home / "sessions" / "worldmodel-deep"
+            task_sessions.mkdir(parents=True)
+            (task_sessions / "agent.json").write_text("{}")
+
+            scanner = OpenClawScanner(openclaw_home=Path(oc_dir), clawteam_home=ct_home)
+            result = scanner.scan()
+
+            assert result.clawteam_found is True
+            assert result.session_count == 1
+            agent_ids = [a.id for a in result.agents]
+            assert "clawteam/worldmodel-deep" in agent_ids
+
+    def test_clawteam_merges_with_openclaw_agents(self):
+        """Agents in both sources should be merged, not duplicated."""
+        with tempfile.TemporaryDirectory() as oc_dir, \
+             tempfile.TemporaryDirectory() as ct_dir:
+            oc_home = Path(oc_dir)
+            ct_home = Path(ct_dir)
+
+            (oc_home / "agents" / "shared-bot").mkdir(parents=True)
+
+            tasks_dir = ct_home / "tasks" / "my-task"
+            tasks_dir.mkdir(parents=True)
+            (tasks_dir / "task-x.json").write_text(json.dumps({"owner": "shared-bot"}))
+
+            scanner = OpenClawScanner(openclaw_home=oc_home, clawteam_home=ct_home)
+            result = scanner.scan()
+
+            agent_ids = [a.id for a in result.agents]
+            assert agent_ids.count("shared-bot") == 1  # not duplicated

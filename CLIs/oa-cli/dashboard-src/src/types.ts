@@ -6,6 +6,7 @@ export interface MetricData {
   trend: number | null;
   date: string | null;
   status: string;
+  breakdown?: Record<string, unknown>;
 }
 
 export interface GoalSummary {

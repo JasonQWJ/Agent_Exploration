@@ -26,16 +26,17 @@ class TeamHealthPipeline(Pipeline):
 
             active_agents = 0
             memory_logged = 0
-            total_agents = len(config.agents)
 
-            # Step 1: Check each agent's activity
+            # Step 1: Check each agent from config list (OpenClaw agents)
             with tracer.span("Scan Agent Activity") as scan:
                 for agent in config.agents:
                     sessions = self._count_agent_sessions(
-                        config.openclaw_home, agent.id, date
+                        config.openclaw_home, agent.id, date,
+                        clawteam_home=config.clawteam_home,
                     )
                     has_memory = self._check_memory_logged(
-                        config.openclaw_home, agent.id, date
+                        config.openclaw_home, agent.id, date,
+                        clawteam_home=config.clawteam_home,
                     )
 
                     if sessions > 0:
@@ -43,17 +44,30 @@ class TeamHealthPipeline(Pipeline):
                     if has_memory:
                         memory_logged += 1
 
-                    # Write to daily_agent_activity
                     self._write_activity(
                         config.db_path, date, agent.id,
                         sessions, has_memory,
                     )
 
-                scan.set_attribute("active_agents", active_agents)
-                scan.set_attribute("memory_logged", memory_logged)
-                scan.set_attribute("total_agents", total_agents)
+            # Step 2: Directly scan ClawTeam tasks for today's activity
+            # (covers agents not listed in config.agents)
+            with tracer.span("Scan ClawTeam Tasks") as ct_span:
+                ct_agent_ids = self._scan_clawteam_active_agents(
+                    config.clawteam_home, date
+                )
+                # Exclude agents already counted above
+                known_ids = {a.id for a in config.agents}
+                new_ct_agents = [a for a in ct_agent_ids if a not in known_ids]
 
-            # Step 2: Compute metrics
+                for agent_id in new_ct_agents:
+                    active_agents += 1
+                    self._write_activity(config.db_path, date, agent_id, 1, False)
+
+                ct_span.set_attribute("clawteam_new_agents", len(new_ct_agents))
+
+            total_agents = len(config.agents) + len(new_ct_agents)
+
+            # Step 3: Compute metrics
             with tracer.span("Compute Metrics"):
                 discipline = (
                     round(memory_logged / total_agents * 100, 1)
@@ -76,7 +90,8 @@ class TeamHealthPipeline(Pipeline):
         ]
 
     def _count_agent_sessions(self, openclaw_home: Path, agent_id: str,
-                              date: str) -> int:
+                              date: str, *,
+                              clawteam_home: Path | None = None) -> int:
         """Count sessions for an agent on a given date across known layouts."""
         count = 0
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -109,10 +124,29 @@ class TeamHealthPipeline(Pipeline):
                 except OSError:
                     continue
 
+        # Layout 3: ~/.clawteam/sessions/<agent_id>/*
+        if clawteam_home is not None:
+            ct_sessions = clawteam_home / "sessions" / agent_id
+            if not ct_sessions.exists():
+                # Also try stripping the "clawteam/" prefix virtual agents use
+                raw_id = agent_id.removeprefix("clawteam/")
+                ct_sessions = clawteam_home / "sessions" / raw_id
+            if ct_sessions.exists():
+                for path in ct_sessions.iterdir():
+                    if not path.is_file():
+                        continue
+                    try:
+                        mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
+                        if mtime == target_date:
+                            count += 1
+                    except OSError:
+                        continue
+
         return count
 
     def _check_memory_logged(self, openclaw_home: Path, agent_id: str,
-                             date: str) -> bool:
+                             date: str, *,
+                             clawteam_home: Path | None = None) -> bool:
         """Check if an agent has a memory file for the given date."""
         possible_paths = [
             openclaw_home / "agents" / agent_id / "memory" / f"{date}.md",
@@ -120,6 +154,14 @@ class TeamHealthPipeline(Pipeline):
             openclaw_home / "workspace" / "memory" / f"{date}.md",
             openclaw_home / "workspace" / "memory" / f"{date}-*.md",
         ]
+
+        # ClawTeam workspace memory layouts
+        if clawteam_home is not None:
+            raw_id = agent_id.removeprefix("clawteam/")
+            possible_paths += [
+                clawteam_home / "workspaces" / raw_id / "memory" / f"{date}.md",
+                clawteam_home / "workspaces" / raw_id / "memory" / f"{date}-*.md",
+            ]
 
         for path in possible_paths:
             if "*" in path.name:
@@ -146,3 +188,69 @@ class TeamHealthPipeline(Pipeline):
         )
         db.commit()
         db.close()
+
+    def _scan_clawteam_active_agents(self, clawteam_home: Path, date: str) -> list[str]:
+        """Scan ~/.clawteam/tasks to find agents active on a given date.
+
+        Reads task-*.json files and checks updatedAt / startedAt / lockedAt fields.
+        Returns a deduplicated list of agent (owner) IDs that were active on `date`.
+        """
+        import json
+
+        if not clawteam_home.exists():
+            return []
+
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        active: set[str] = set()
+
+        tasks_dir = clawteam_home / "tasks"
+        if not tasks_dir.exists():
+            return []
+
+        for task_group in tasks_dir.iterdir():
+            if not task_group.is_dir():
+                continue
+            for task_file in task_group.glob("task-*.json"):
+                try:
+                    with open(task_file, encoding="utf-8") as f:
+                        data = json.load(f)
+
+                    # Check if the task was active on the target date
+                    ts_fields = ["updatedAt", "startedAt", "lockedAt", "createdAt"]
+                    matched = False
+                    for field in ts_fields:
+                        ts_raw = data.get(field)
+                        if ts_raw:
+                            try:
+                                ts = datetime.fromisoformat(
+                                    ts_raw.replace("Z", "+00:00")
+                                )
+                                # Compare in local date
+                                if ts.date() == target_date:
+                                    matched = True
+                                    break
+                            except ValueError:
+                                continue
+
+                    # Also check file mtime as fallback
+                    if not matched:
+                        try:
+                            mtime = datetime.fromtimestamp(task_file.stat().st_mtime).date()
+                            if mtime == target_date:
+                                matched = True
+                        except OSError:
+                            pass
+
+                    if matched:
+                        owner = data.get("owner")
+                        locked_by = data.get("lockedBy")
+                        # Use owner as agent ID; skip generic lock holders like "agent"
+                        if owner and owner not in ("agent", ""):
+                            active.add(owner)
+                        elif locked_by and locked_by not in ("agent", ""):
+                            active.add(locked_by)
+
+                except (OSError, ValueError, KeyError):
+                    continue
+
+        return sorted(active)

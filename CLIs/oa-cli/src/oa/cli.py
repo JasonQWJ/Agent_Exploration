@@ -60,6 +60,10 @@ def init(name: str, yes: bool):
         disabled = len(result.cron_jobs) - enabled
         console.print(f"  Cron:      [green]✓[/] {len(result.cron_jobs)} jobs ({enabled} enabled, {disabled} disabled)")
         console.print(f"  Sessions:  [green]✓[/] {result.session_count} session files")
+        if result.clawteam_found:
+            console.print(f"  ClawTeam:  [green]✓[/] Found at {result.clawteam_home}")
+        else:
+            console.print("  ClawTeam:  [dim]⊘ not found at ~/.clawteam[/]")
 
     # Generate config
     config = ProjectConfig.from_scan(result)
@@ -118,6 +122,7 @@ def collect(goal: str | None, date: str | None, config_path: str):
     from .core.config import ProjectConfig
     from .pipelines.cron_reliability import CronReliabilityPipeline
     from .pipelines.team_health import TeamHealthPipeline
+    from .pipelines.self_improvement import SelfImprovingPipeline
 
     config_file = Path(config_path)
     if not config_file.exists():
@@ -133,6 +138,7 @@ def collect(goal: str | None, date: str | None, config_path: str):
     builtin_pipelines = {
         "cron_reliability": CronReliabilityPipeline(),
         "team_health": TeamHealthPipeline(),
+        "self_improvement": SelfImprovingPipeline(),
     }
 
     for goal_config in config.goals:
@@ -280,6 +286,13 @@ def doctor():
     else:
         console.print("  OpenClaw:  [yellow]⊘[/] not found at ~/.openclaw")
 
+    # ClawTeam
+    clawteam_home = Path.home() / ".clawteam"
+    if clawteam_home.exists():
+        console.print(f"  ClawTeam:  [green]✓[/] found at {clawteam_home}")
+    else:
+        console.print("  ClawTeam:  [dim]⊘[/] not found at ~/.clawteam")
+
     # Cron jobs
     jobs_file = openclaw_home / "cron" / "jobs.json"
     if jobs_file.exists():
@@ -345,6 +358,7 @@ def _goal_description(goal_id: str) -> str:
     descriptions = {
         "cron_reliability": "success rate across all cron jobs",
         "team_health": "daily agent activity and memory discipline",
+        "self_improvement": "agent team growth and improvement metrics",
     }
     return descriptions.get(goal_id, "")
 

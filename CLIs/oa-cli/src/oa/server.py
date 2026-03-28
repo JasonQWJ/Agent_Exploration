@@ -150,7 +150,7 @@ class OAHandler(SimpleHTTPRequestHandler):
             for m_cfg in metrics_cfg:
                 # Latest value
                 row = db.execute(
-                    "SELECT value, date FROM goal_metrics WHERE goal=? AND metric=? ORDER BY date DESC LIMIT 1",
+                    "SELECT value, date, breakdown FROM goal_metrics WHERE goal=? AND metric=? ORDER BY date DESC LIMIT 1",
                     (goal_id, m_cfg["name"]),
                 ).fetchone()
 
@@ -162,6 +162,7 @@ class OAHandler(SimpleHTTPRequestHandler):
 
                 value = row["value"] if row else None
                 trend = round(value - prev["value"], 1) if (row and prev) else None
+                breakdown = json.loads(row["breakdown"]) if (row and row["breakdown"]) else None
 
                 goal_data["metrics"][m_cfg["name"]] = {
                     "value": value,
@@ -170,6 +171,7 @@ class OAHandler(SimpleHTTPRequestHandler):
                     "warning": m_cfg.get("warning", 0),
                     "trend": trend,
                     "date": row["date"] if row else None,
+                    "breakdown": breakdown,
                     "status": _health_status(value, m_cfg.get("healthy", 0), m_cfg.get("warning", 0)),
                 }
 

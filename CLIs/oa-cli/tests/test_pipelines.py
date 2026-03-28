@@ -137,4 +137,6 @@ class TestTeamHealthPipeline:
             active = next(m for m in metrics if m.name == "active_agent_count")
             memory = next(m for m in metrics if m.name == "memory_discipline")
             assert active.value >= 1
-            assert memory.value >= 50
+            # Shared workspace memory should count for the main journal only,
+            # not automatically for every configured agent.
+            assert memory.value == 0

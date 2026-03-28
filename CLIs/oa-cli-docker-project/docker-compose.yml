@@ -8,6 +8,7 @@ services:
       - "3460:3460"
     volumes:
       - /Users/jason/.openclaw:/data/openclaw:ro
+      - /Users/jason/.clawteam:/data/clawteam:ro
       - ./data:/work/data
       - ./pipelines:/work/pipelines
       - ./config.yaml:/work/config.yaml

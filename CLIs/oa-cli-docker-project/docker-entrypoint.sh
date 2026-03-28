@@ -6,9 +6,10 @@ python - <<'PY'
 from pathlib import Path
 from oa.core.scanner import OpenClawScanner
 from oa.core.config import ProjectConfig
-scan = OpenClawScanner(Path('/data/openclaw')).scan()
+scan = OpenClawScanner(Path('/data/openclaw'), clawteam_home=Path('/data/clawteam')).scan()
 config = ProjectConfig.from_scan(scan)
 config.openclaw_home = Path('/data/openclaw')
+config.clawteam_home = Path('/data/clawteam')
 config.db_path = Path('data/monitor.db')
 config.save(Path('/work/config.yaml'))
 print('Detected agents:', ', '.join(a.id for a in config.agents) or '(none)')

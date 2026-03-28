@@ -35,21 +35,21 @@ class SelfImprovingPipeline(Pipeline):
             target_date = datetime.strptime(date, "%Y-%m-%d").date()
 
             # Step 1: Issues resolved from ClawTeam tasks
-            with tracer.span("Scan Issues Resolved"):
+            with tracer.span("Scan Issues Resolved") as span:
                 issues_resolved = self._count_resolved_issues(config.clawteam_home, target_date)
-                tracer.set_attribute("issues_resolved", issues_resolved)
+                span.set_attribute("issues_resolved", issues_resolved)
 
             # Step 2: New skills installed
-            with tracer.span("Scan Skills Installed"):
+            with tracer.span("Scan Skills Installed") as span:
                 skills_added = self._count_new_skills(config.openclaw_home, target_date)
-                tracer.set_attribute("skills_added", skills_added)
+                span.set_attribute("skills_added", skills_added)
 
             # Step 3: Memory entries written
-            with tracer.span("Scan Memory Entries"):
+            with tracer.span("Scan Memory Entries") as span:
                 memory_entries = self._count_memory_entries(
                     config.openclaw_home, config.clawteam_home, target_date
                 )
-                tracer.set_attribute("memory_entries", memory_entries)
+                span.set_attribute("memory_entries", memory_entries)
 
             # Step 4: Composite score (0–100)
             with tracer.span("Compute Score"):

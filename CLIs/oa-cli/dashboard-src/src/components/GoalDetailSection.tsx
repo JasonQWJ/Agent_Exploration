@@ -282,12 +282,14 @@ const AGENT_COLORS: Record<string, string> = {
 
 function TeamHealthTooltip({ active, payload, label }: {
   active?: boolean;
-  payload?: Array<{ dataKey: string; value: number; color: string }>;
+  payload?: Array<{ dataKey: string; value: number; color: string; payload?: Record<string, unknown> }>;
   label?: string;
 }) {
   if (!active || !payload?.length) return null;
-  const agents = payload.filter(p => p.dataKey !== "sessions" && p.value > 0);
+  const agentEntries = payload.filter(p => p.dataKey !== "sessions");
+  const activeAgents = agentEntries.filter(p => p.value > 0);
   const sessionsEntry = payload.find(p => p.dataKey === "sessions");
+  const inactiveCount = Number(payload[0]?.payload?.inactiveCount ?? 0);
 
   return (
     <div style={{
@@ -298,14 +300,14 @@ function TeamHealthTooltip({ active, payload, label }: {
       padding: "10px 14px",
       fontSize: "11px",
       boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-      minWidth: "160px",
+      minWidth: "180px",
     }}>
       <div style={{ color: "#6B7280", fontSize: "10px", marginBottom: "6px" }}>{label}</div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
         <span style={{ fontWeight: 600, color: "#1F2937" }}>Active Agents</span>
-        <span style={{ fontWeight: 700, color: "#374151" }}>{agents.length}</span>
+        <span style={{ fontWeight: 700, color: "#374151" }}>{activeAgents.length}</span>
       </div>
-      {agents.map(a => (
+      {activeAgents.map(a => (
         <div key={a.dataKey} style={{ display: "flex", alignItems: "center", gap: "4px", padding: "1px 0" }}>
           <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: a.color, display: "inline-block" }} />
           <span style={{ color: "#6B7280", fontSize: "10px" }}>{a.dataKey}</span>
@@ -320,6 +322,13 @@ function TeamHealthTooltip({ active, payload, label }: {
           </div>
         </>
       )}
+      {inactiveCount > 0 && (
+        <div style={{ marginTop: "6px", paddingTop: "4px", borderTop: "1px solid rgba(0,0,0,0.04)" }}>
+          <span style={{ color: "#D1D5DB", fontSize: "9px" }}>
+            +{inactiveCount} inactive agent{inactiveCount > 1 ? "s" : ""}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -327,7 +336,6 @@ function TeamHealthTooltip({ active, payload, label }: {
 // ── Team Health: Stacked DAA Bar + Sessions Line (matches internal) ──
 
 function TeamHealthDualChart({ teamHealth }: { teamHealth: AgentActivity[] }) {
-  // Get unique agents and dates
   const agentIds = [...new Set(teamHealth.map(a => a.agent_id))];
   const dates = [...new Set(teamHealth.map(a => a.date))].sort();
 
@@ -339,17 +347,35 @@ function TeamHealthDualChart({ teamHealth }: { teamHealth: AgentActivity[] }) {
     );
   }
 
+  const activityByAgent = agentIds.map(agent => {
+    const rows = teamHealth.filter(a => a.agent_id === agent);
+    return {
+      agent,
+      activeDays: rows.filter(r => r.session_count > 0).length,
+    };
+  });
+
+  const activeAgents = activityByAgent.filter(a => a.activeDays > 0).map(a => a.agent);
+  const inactiveAgents = activityByAgent.filter(a => a.activeDays === 0).map(a => a.agent);
+
   const chartData = dates.map(date => {
     const dayData: Record<string, unknown> = { dateLabel: formatDate(date) };
     let totalSessions = 0;
-    for (const agent of agentIds) {
+    for (const agent of activeAgents) {
       const row = teamHealth.find(a => a.date === date && a.agent_id === agent);
-      dayData[agent] = row && row.session_count > 0 ? 1 : 0; // 1 = active, 0 = inactive
+      dayData[agent] = row && row.session_count > 0 ? 1 : 0;
       totalSessions += row?.session_count || 0;
     }
+    for (const agent of inactiveAgents) {
+      const row = teamHealth.find(a => a.date === date && a.agent_id === agent);
+      totalSessions += row?.session_count || 0;
+    }
+    dayData.inactiveCount = inactiveAgents.length;
     dayData.sessions = totalSessions;
     return dayData;
   });
+
+  const maxDAA = Math.max(activeAgents.length, 1);
 
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -358,14 +384,14 @@ function TeamHealthDualChart({ teamHealth }: { teamHealth: AgentActivity[] }) {
         <XAxis dataKey="dateLabel" tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false}
           axisLine={{ stroke: "rgba(0,0,0,0.06)" }} interval="preserveStartEnd" />
         <YAxis yAxisId="daa" tick={{ fontSize: 10, fill: "#9CA3AF" }} tickLine={false}
-          axisLine={false} width={28} allowDecimals={false} domain={[0, Math.max(agentIds.length, 6)]}
+          axisLine={false} width={28} allowDecimals={false} domain={[0, Math.max(maxDAA + 1, 2)]}
           label={{ value: "#DAA", angle: -90, position: "insideLeft", style: { fontSize: 9, fill: "#9CA3AF" } }} />
         <YAxis yAxisId="sessions" orientation="right" tick={{ fontSize: 10, fill: "#F59E0B" }}
           tickLine={false} axisLine={false} width={28} allowDecimals={false}
           label={{ value: "Sessions", angle: 90, position: "insideRight", style: { fontSize: 9, fill: "#F59E0B" } }} />
         <Tooltip content={<TeamHealthTooltip />} wrapperStyle={{ zIndex: 50 }} />
         <Legend iconSize={8} wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} />
-        {agentIds.map((agent, i) => (
+        {activeAgents.map((agent, i) => (
           <Bar key={agent} yAxisId="daa" dataKey={agent} stackId="daa"
             fill={AGENT_COLORS[agent] || `hsl(${i * 60}, 60%, 60%)`}
             fillOpacity={0.7} name={agent} />
@@ -384,20 +410,28 @@ function TeamHealthAgentBars({ teamHealth }: { teamHealth: AgentActivity[] }) {
   const agentStats = agentIds.map(agent => {
     const rows = teamHealth.filter(a => a.agent_id === agent);
     const daaDays = rows.filter(r => r.session_count > 0).length;
-    const sessionDays = rows.filter(r => r.session_count > 0).length;
     const totalSessions = rows.reduce((sum, r) => sum + r.session_count, 0);
-    return { agent, daaDays, sessionDays, totalSessions };
-  }).sort((a, b) => b.daaDays - a.daaDays);
+    return { agent, daaDays, totalSessions };
+  }).sort((a, b) => b.daaDays - a.daaDays || b.totalSessions - a.totalSessions);
 
-  const maxDays = Math.max(...agentStats.map(d => d.daaDays), 1);
+  const activeStats = agentStats.filter(a => a.daaDays > 0);
+  const inactiveCount = agentStats.length - activeStats.length;
+  const maxDays = Math.max(...activeStats.map(d => d.daaDays), 1);
 
   return (
     <div>
-      <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-        Days Active per Agent
-      </h4>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          Days Active per Agent
+        </h4>
+        {inactiveCount > 0 && (
+          <span className="text-[9px] text-gray-300 italic">
+            {inactiveCount} inactive agent{inactiveCount > 1 ? "s" : ""} · not shown
+          </span>
+        )}
+      </div>
       <div className="space-y-2">
-        {agentStats.map(({ agent, daaDays, totalSessions }) => (
+        {activeStats.map(({ agent, daaDays, totalSessions }) => (
           <div key={agent} className="flex items-center gap-2">
             <span className="text-[11px] text-gray-500 w-16 text-right shrink-0 capitalize">{agent}</span>
             <div className="flex-1 h-3 bg-gray-50 rounded-full overflow-hidden">
@@ -410,6 +444,75 @@ function TeamHealthAgentBars({ teamHealth }: { teamHealth: AgentActivity[] }) {
             </div>
             <span className="text-[9px] text-gray-500 w-6 shrink-0">{daaDays}d</span>
             <span className="text-[9px] text-gray-400 w-14 shrink-0">{totalSessions} sess</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Self-Improving current-state chart ──
+
+function SelfImprovingBreakdownChart({ goal }: { goal: GoalSummary }) {
+  const scoreMetric = goal.metrics.self_improvement_score;
+  const breakdown = scoreMetric?.breakdown as Record<string, number> | undefined;
+
+  if (!breakdown) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-1">
+        <span className="text-sm text-gray-300">Self-improvement data loading...</span>
+        <span className="text-[10px] text-gray-200">Run <code className="bg-gray-50 px-1.5 py-0.5 rounded">oa collect</code> daily</span>
+      </div>
+    );
+  }
+
+  const bars = [
+    {
+      key: "issues",
+      label: "Issues",
+      score: breakdown.issue_score ?? 0,
+      count: breakdown.issues_resolved ?? 0,
+      color: "#34D399",
+    },
+    {
+      key: "skills",
+      label: "Skills",
+      score: breakdown.skill_score ?? 0,
+      count: breakdown.skills_added ?? 0,
+      color: "#FBBF24",
+    },
+    {
+      key: "memory",
+      label: "Memory",
+      score: breakdown.memory_score ?? 0,
+      count: breakdown.memory_entries ?? 0,
+      color: "#A78BFA",
+    },
+  ];
+
+  return (
+    <div className="h-full rounded-2xl bg-white/50 p-4 flex flex-col justify-center">
+      <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-3">Component Score Breakdown</div>
+      <div className="space-y-3">
+        {bars.map((bar) => (
+          <div key={bar.key} className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-medium text-gray-600">{bar.label}</span>
+              <span className="font-semibold" style={{ color: bar.color }}>{Math.round(bar.score)}%</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ backgroundColor: bar.color }}
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, bar.score)}%` }}
+                transition={{ duration: 0.7, delay: 0.1 }}
+              />
+            </div>
+            <div className="flex justify-between text-[10px] text-gray-400">
+              <span>{bar.count} event{bar.count === 1 ? "" : "s"}</span>
+              <span>{Math.round(bar.score)}/100</span>
+            </div>
           </div>
         ))}
       </div>
@@ -468,6 +571,7 @@ export function GoalDetailSection({ goal, index, metrics, cronRuns, teamHealth }
   const isPercent = primary && (primary[1].unit === "%" || primary[1].unit === "percent");
   const isCronGoal = goal.id.includes("cron");
   const isTeamGoal = goal.id.includes("team") || goal.id.includes("health");
+  const isSelfImprovingGoal = goal.id === "self_improvement";
 
   return (
     <>
@@ -497,6 +601,8 @@ export function GoalDetailSection({ goal, index, metrics, cronRuns, teamHealth }
             <CronReliabilityChart cronRuns={cronRuns} />
           ) : isTeamGoal ? (
             <TeamHealthDualChart teamHealth={teamHealth} />
+          ) : isSelfImprovingGoal ? (
+            <SelfImprovingBreakdownChart goal={goal} />
           ) : goal.sparkline.length >= 2 ? (
             <DefaultChart goal={goal} color={color} isPercent={!!isPercent} />
           ) : (

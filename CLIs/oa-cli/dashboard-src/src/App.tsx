@@ -3,8 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useOAData } from "./hooks/useOAData";
 import { SystemHealth } from "./components/SystemHealth";
 import { MechanismView } from "./components/MechanismView";
-import { SelfImprovingView } from "./components/SelfImprovingView";
-type Tab = "system-health" | "mechanism" | "self-improving";
+type Tab = "system-health" | "mechanism";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("system-health");
@@ -27,7 +26,6 @@ export default function App() {
           <nav className="flex gap-6">
             {([
               ["system-health", "System Health"],
-              ["self-improving", "Self-Improving"],
               ["mechanism", "Mechanism"],
             ] as [Tab, string][]).map(([tab, label]) => (
               <button
@@ -102,11 +100,6 @@ export default function App() {
                   goals={goals}
                   traces={traces}
                   cronRuns={cronRuns}
-                />
-              ) : activeTab === "self-improving" ? (
-                <SelfImprovingView
-                  goals={goals}
-                  goalMetrics={goalMetrics}
                 />
               ) : null}
             </motion.div>

@@ -27,6 +27,15 @@ class TeamHealthPipeline(Pipeline):
             active_agents = 0
             memory_logged = 0
 
+            # Pre-scan ClawTeam task activity so worker agents can be counted even
+            # when ~/.clawteam/sessions is organized by team instead of by worker name.
+            with tracer.span("Scan ClawTeam Tasks") as ct_span:
+                ct_agent_ids = self._scan_clawteam_active_agents(
+                    config.clawteam_home, date
+                )
+                ct_active_set = set(ct_agent_ids)
+                ct_span.set_attribute("clawteam_active_agents", len(ct_active_set))
+
             # Step 1: Check each agent from config list (OpenClaw agents)
             with tracer.span("Scan Agent Activity") as scan:
                 for agent in config.agents:
@@ -34,6 +43,9 @@ class TeamHealthPipeline(Pipeline):
                         config.openclaw_home, agent.id, date,
                         clawteam_home=config.clawteam_home,
                     )
+                    if sessions == 0 and agent.id in ct_active_set:
+                        sessions = 1
+
                     has_memory = self._check_memory_logged(
                         config.openclaw_home, agent.id, date,
                         clawteam_home=config.clawteam_home,
@@ -49,21 +61,22 @@ class TeamHealthPipeline(Pipeline):
                         sessions, has_memory,
                     )
 
-            # Step 2: Directly scan ClawTeam tasks for today's activity
-            # (covers agents not listed in config.agents)
-            with tracer.span("Scan ClawTeam Tasks") as ct_span:
-                ct_agent_ids = self._scan_clawteam_active_agents(
-                    config.clawteam_home, date
-                )
-                # Exclude agents already counted above
+            # Step 2: Add ClawTeam-only agents not already listed in config.agents
+            with tracer.span("Write ClawTeam-Only Agents") as ct_only_span:
                 known_ids = {a.id for a in config.agents}
                 new_ct_agents = [a for a in ct_agent_ids if a not in known_ids]
 
                 for agent_id in new_ct_agents:
                     active_agents += 1
-                    self._write_activity(config.db_path, date, agent_id, 1, False)
+                    has_memory = self._check_memory_logged(
+                        config.openclaw_home, agent_id, date,
+                        clawteam_home=config.clawteam_home,
+                    )
+                    if has_memory:
+                        memory_logged += 1
+                    self._write_activity(config.db_path, date, agent_id, 1, has_memory)
 
-                ct_span.set_attribute("clawteam_new_agents", len(new_ct_agents))
+                ct_only_span.set_attribute("clawteam_new_agents", len(new_ct_agents))
 
             total_agents = len(config.agents) + len(new_ct_agents)
 
@@ -147,13 +160,22 @@ class TeamHealthPipeline(Pipeline):
     def _check_memory_logged(self, openclaw_home: Path, agent_id: str,
                              date: str, *,
                              clawteam_home: Path | None = None) -> bool:
-        """Check if an agent has a memory file for the given date."""
+        """Check if an agent has a memory file for the given date.
+
+        Important: the shared main workspace memory file should only count for the
+        main agent. Otherwise every configured agent appears to have logged memory.
+        """
         possible_paths = [
             openclaw_home / "agents" / agent_id / "memory" / f"{date}.md",
             openclaw_home / "workspaces" / agent_id / "memory" / f"{date}.md",
-            openclaw_home / "workspace" / "memory" / f"{date}.md",
-            openclaw_home / "workspace" / "memory" / f"{date}-*.md",
         ]
+
+        # Only the main agent may claim the shared workspace memory journal.
+        if agent_id == "main":
+            possible_paths += [
+                openclaw_home / "workspace" / "memory" / f"{date}.md",
+                openclaw_home / "workspace" / "memory" / f"{date}-*.md",
+            ]
 
         # ClawTeam workspace memory layouts
         if clawteam_home is not None:
@@ -165,7 +187,7 @@ class TeamHealthPipeline(Pipeline):
 
         for path in possible_paths:
             if "*" in path.name:
-                if list(path.parent.glob(path.name)):
+                if path.parent.exists() and list(path.parent.glob(path.name)):
                     return True
             elif path.exists():
                 return True

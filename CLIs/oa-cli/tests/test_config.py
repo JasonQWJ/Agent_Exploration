@@ -52,6 +52,10 @@ class TestProjectConfig:
         assert len(c.goals) == 0
         assert c.db_path == Path("data/monitor.db")
 
+    def test_qclaw_home_default(self):
+        c = ProjectConfig()
+        assert c.qclaw_home == Path.home() / ".qclaw"
+
     def test_save_and_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
@@ -109,12 +113,14 @@ class TestProjectConfig:
         assert len(config.agents) == 4
         assert config.agents[0].id == "researcher"
 
-        # Should have 2 built-in goals
-        assert len(config.goals) == 2
+        # Should have 3 built-in goals
+        assert len(config.goals) == 3
         assert config.goals[0].id == "cron_reliability"
         assert config.goals[0].builtin is True
         assert config.goals[1].id == "team_health"
         assert config.goals[1].builtin is True
+        assert config.goals[2].id == "self_improvement"
+        assert config.goals[2].builtin is True
 
         # Team health threshold should be based on agent count
         active_metric = config.goals[1].metrics[0]
@@ -125,4 +131,4 @@ class TestProjectConfig:
         scan = ScanResult(openclaw_home=Path("/tmp/fake"), found=False)
         config = ProjectConfig.from_scan(scan)
         assert len(config.agents) == 0
-        assert len(config.goals) == 2  # built-ins still added
+        assert len(config.goals) == 3  # all 3 built-ins still added

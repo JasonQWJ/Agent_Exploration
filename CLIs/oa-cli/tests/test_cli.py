@@ -74,6 +74,14 @@ class TestCLI:
                 assert result.exit_code == 1
                 assert "config.yaml not found" in result.output
 
+    def test_serve_accepts_host_option(self):
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with runner.isolated_filesystem(temp_dir=tmpdir):
+                result = runner.invoke(main, ["serve", "--host", "0.0.0.0"])
+                assert result.exit_code == 1
+                assert "config.yaml not found" in result.output
+
     def test_full_workflow(self):
         """Integration test: init → collect → status."""
         runner = CliRunner()

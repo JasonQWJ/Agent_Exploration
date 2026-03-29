@@ -40,6 +40,8 @@ class AgentConfig:
 class ProjectConfig:
     """Top-level project configuration."""
     openclaw_home: Path = field(default_factory=lambda: Path.home() / ".openclaw")
+    clawteam_home: Path = field(default_factory=lambda: Path.home() / ".clawteam")
+    qclaw_home: Path = field(default_factory=lambda: Path.home() / ".qclaw")
     agents: list[AgentConfig] = field(default_factory=list)
     goals: list[GoalConfig] = field(default_factory=list)
     db_path: Path = field(default_factory=lambda: Path("data/monitor.db"))
@@ -53,6 +55,8 @@ class ProjectConfig:
 
         config = cls()
         config.openclaw_home = Path(data.get("openclaw_home", "~/.openclaw")).expanduser()
+        config.clawteam_home = Path(data.get("clawteam_home", "~/.clawteam")).expanduser()
+        config.qclaw_home = Path(data.get("qclaw_home", "~/.qclaw")).expanduser()
         raw_db = Path(data.get("db_path", "data/monitor.db"))
         if not raw_db.is_absolute():
             raw_db = path.parent / raw_db
@@ -90,6 +94,8 @@ class ProjectConfig:
 
         data: dict[str, Any] = {
             "openclaw_home": str(self.openclaw_home),
+            "clawteam_home": str(self.clawteam_home),
+            "qclaw_home": str(self.qclaw_home),
             "db_path": str(self.db_path),
             "agents": [
                 {"id": a.id, "name": a.name}
@@ -125,7 +131,11 @@ class ProjectConfig:
     @classmethod
     def from_scan(cls, scan: ScanResult) -> "ProjectConfig":
         """Generate a default config from an OpenClaw scan result."""
-        config = cls(openclaw_home=scan.openclaw_home)
+        config = cls(
+            openclaw_home=scan.openclaw_home,
+            clawteam_home=scan.clawteam_home,
+            qclaw_home=scan.qclaw_home,
+        )
 
         # Add detected agents
         for agent in scan.agents:
@@ -157,6 +167,19 @@ class ProjectConfig:
                     warning=warning_threshold,
                 ),
                 MetricConfig(name="memory_discipline", unit="%", healthy=80, warning=50),
+            ],
+        ))
+
+        # Built-in: G3 Self Improvement
+        config.goals.append(GoalConfig(
+            id="self_improvement",
+            name="System Self-Improving",
+            builtin=True,
+            metrics=[
+                MetricConfig(name="self_improvement_score", unit="%", healthy=70, warning=40),
+                MetricConfig(name="issues_resolved", unit="count", healthy=3, warning=1),
+                MetricConfig(name="skills_added", unit="count", healthy=1, warning=0),
+                MetricConfig(name="memory_entries", unit="count", healthy=5, warning=2),
             ],
         ))
 

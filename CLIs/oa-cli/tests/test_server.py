@@ -87,6 +87,7 @@ def server():
     from http.server import HTTPServer
     OAHandler.config_path = config_path
     OAHandler._config_cache = None
+    OAHandler._config_dir = Path(config_path).resolve().parent
 
     httpd = HTTPServer(("127.0.0.1", PORT), OAHandler)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)

@@ -28,6 +28,8 @@ def _make_project(tmpdir: str) -> ProjectConfig:
         openclaw_home=oc_home,
         # Isolated fake clawteam_home so tests don't read real ~/.clawteam
         clawteam_home=Path("/tmp/nonexistent-clawteam-pipeline-test"),
+        # Isolated fake qclaw_home so tests don't read real ~/.qclaw
+        qclaw_home=Path("/tmp/nonexistent-qclaw-pipeline-test"),
         db_path=db_path,
     )
     config.agents = [

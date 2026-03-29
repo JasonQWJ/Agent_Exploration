@@ -30,6 +30,8 @@ class ScanResult:
     """Result of scanning an OpenClaw installation."""
     openclaw_home: Path
     clawteam_home: Path = field(default_factory=lambda: Path.home() / ".clawteam")
+    qclaw_home: Path = field(default_factory=lambda: Path.home() / ".qclaw")
+    qclaw_found: bool = False
     clawteam_found: bool = False
     agents: list[AgentInfo] = field(default_factory=list)
     cron_jobs: list[CronJobInfo] = field(default_factory=list)
@@ -38,22 +40,44 @@ class ScanResult:
 
 
 class OpenClawScanner:
-    """Scans ~/.openclaw and ~/.clawteam for agents, cron jobs, and sessions."""
+    """Scans ~/.openclaw, ~/.clawteam, and ~/.qclaw for agents, cron jobs, and sessions."""
 
     def __init__(self, openclaw_home: Path | None = None,
-                 clawteam_home: Path | None = None):
+                 clawteam_home: Path | None = None,
+                 qclaw_home: Path | None = None):
         self.home = openclaw_home or Path.home() / ".openclaw"
         self.clawteam_home = clawteam_home or Path.home() / ".clawteam"
+        self.qclaw_home = qclaw_home or Path.home() / ".qclaw"
 
     def scan(self) -> ScanResult:
         """Run full scan and return results."""
-        result = ScanResult(openclaw_home=self.home, clawteam_home=self.clawteam_home)
+        result = ScanResult(
+            openclaw_home=self.home,
+            clawteam_home=self.clawteam_home,
+            qclaw_home=self.qclaw_home,
+        )
 
         if self.home.exists():
             result.found = True
             result.cron_jobs = self._scan_cron_jobs()
             result.agents = self._scan_agents()
             result.session_count = self._count_sessions()
+
+        if self.qclaw_home.exists():
+            result.qclaw_found = True
+            qclaw_agents = self._scan_qclaw_agents()
+            existing_ids = {a.id for a in result.agents}
+            for agent in qclaw_agents:
+                if agent.id not in existing_ids:
+                    result.agents.append(agent)
+                else:
+                    existing = next(a for a in result.agents if a.id == agent.id)
+                    if agent.last_active and (
+                        not existing.last_active
+                        or agent.last_active > existing.last_active
+                    ):
+                        existing.last_active = agent.last_active
+            result.session_count += self._count_qclaw_sessions()
 
         if self.clawteam_home.exists():
             result.clawteam_found = True
@@ -164,6 +188,53 @@ class OpenClawScanner:
                 if agent_dir.is_dir() and sessions_subdir.exists():
                     count += sum(1 for f in sessions_subdir.iterdir() if f.is_file())
 
+        return count
+
+    def _scan_qclaw_agents(self) -> list[AgentInfo]:
+        """Detect agents from ~/.qclaw/agents/<id>/sessions/*."""
+        agents: dict[str, AgentInfo] = {}
+
+        def upsert(agent_id: str, mtime_ts: float | None = None) -> None:
+            if not agent_id:
+                return
+            mtime_iso = None
+            if mtime_ts is not None:
+                mtime_iso = datetime.fromtimestamp(mtime_ts).isoformat()
+            existing = agents.get(agent_id)
+            if not existing:
+                agents[agent_id] = AgentInfo(id=agent_id, name=agent_id.upper(), last_active=mtime_iso)
+                return
+            if mtime_iso and (not existing.last_active or mtime_iso > existing.last_active):
+                existing.last_active = mtime_iso
+
+        agents_dir = self.qclaw_home / "agents"
+        if agents_dir.exists():
+            for path in agents_dir.iterdir():
+                if not path.is_dir():
+                    continue
+                agent_id = path.name
+                upsert(agent_id)
+                sessions_subdir = path / "sessions"
+                if sessions_subdir.exists():
+                    for session_file in sessions_subdir.iterdir():
+                        if not session_file.is_file():
+                            continue
+                        try:
+                            upsert(agent_id, session_file.stat().st_mtime)
+                        except OSError:
+                            continue
+
+        return sorted(agents.values(), key=lambda a: a.id)
+
+    def _count_qclaw_sessions(self) -> int:
+        """Count session files in ~/.qclaw/agents/<id>/sessions/."""
+        count = 0
+        agents_dir = self.qclaw_home / "agents"
+        if agents_dir.exists():
+            for agent_dir in agents_dir.iterdir():
+                sessions_subdir = agent_dir / "sessions"
+                if agent_dir.is_dir() and sessions_subdir.exists():
+                    count += sum(1 for f in sessions_subdir.iterdir() if f.is_file())
         return count
 
     def _scan_clawteam_agents(self) -> list[AgentInfo]:

@@ -9,6 +9,7 @@ services:
     volumes:
       - /Users/jason/.openclaw:/data/openclaw:ro
       - /Users/jason/.clawteam:/data/clawteam:ro
+      - /Users/jason/.qclaw:/data/qclaw:ro
       - ./data:/work/data
       - ./pipelines:/work/pipelines
       - ./config.yaml:/work/config.yaml

@@ -3,6 +3,7 @@
 
 openclaw_home: /data/openclaw
 clawteam_home: /data/clawteam
+qclaw_home: /root/.qclaw
 db_path: data/monitor.db
 agents:
 - id: codex
@@ -17,8 +18,6 @@ agents:
   name: MAIN
 - id: architect
   name: ARCHITECT
-- id: backend
-  name: BACKEND
 - id: builder
   name: BUILDER
 - id: clawteam/navisworks-ue-export
@@ -27,6 +26,8 @@ agents:
   name: CLAWTEAM/NSPACE-DEEP
 - id: clawteam/oa-self-improving-0327-133626
   name: CLAWTEAM/OA-SELF-IMPROVING-0327-133626
+- id: clawteam/pingpong-test
+  name: CLAWTEAM/PINGPONG-TEST
 - id: clawteam/ue_directlink_dashboard
   name: CLAWTEAM/UE_DIRECTLINK_DASHBOARD
 - id: clawteam/ue_directlink_investigate
@@ -49,16 +50,12 @@ agents:
   name: CUSTOMER-RESEARCHER-2
 - id: customer-satisfaction-ns
   name: CUSTOMER-SATISFACTION-NS
-- id: datamodel
-  name: DATAMODEL
 - id: dd-pi
   name: DD-PI
 - id: dd-worldlabs
   name: DD-WORLDLABS
 - id: designer
   name: DESIGNER
-- id: docs
-  name: DOCS
 - id: financial-analyst-1
   name: FINANCIAL-ANALYST-1
 - id: financial-analyst-2
@@ -69,8 +66,6 @@ agents:
   name: FINANCIAL-REVENUE-NS
 - id: format_expert
   name: FORMAT_EXPERT
-- id: frontend3d
-  name: FRONTEND3D
 - id: grid_specialist
   name: GRID_SPECIALIST
 - id: market-analysis-ns
@@ -109,6 +104,10 @@ agents:
   name: VALUATION-ANALYST
 - id: valuation-ns
   name: VALUATION-NS
+- id: worker1
+  name: WORKER1
+- id: worker2
+  name: WORKER2
 goals:
 - id: cron_reliability
   name: Cron Reliability
@@ -124,8 +123,8 @@ goals:
   metrics:
   - name: active_agent_count
     unit: count
-    healthy: 39
-    warning: 26
+    healthy: 38
+    warning: 25
   - name: memory_discipline
     unit: '%'
     healthy: 80

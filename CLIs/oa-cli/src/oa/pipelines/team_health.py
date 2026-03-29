@@ -42,6 +42,7 @@ class TeamHealthPipeline(Pipeline):
                     sessions = self._count_agent_sessions(
                         config.openclaw_home, agent.id, date,
                         clawteam_home=config.clawteam_home,
+                        qclaw_home=config.qclaw_home,
                     )
                     if sessions == 0 and agent.id in ct_active_set:
                         sessions = 1
@@ -49,6 +50,7 @@ class TeamHealthPipeline(Pipeline):
                     has_memory = self._check_memory_logged(
                         config.openclaw_home, agent.id, date,
                         clawteam_home=config.clawteam_home,
+                        qclaw_home=config.qclaw_home,
                     )
 
                     if sessions > 0:
@@ -71,6 +73,7 @@ class TeamHealthPipeline(Pipeline):
                     has_memory = self._check_memory_logged(
                         config.openclaw_home, agent_id, date,
                         clawteam_home=config.clawteam_home,
+                        qclaw_home=config.qclaw_home,
                     )
                     if has_memory:
                         memory_logged += 1
@@ -104,7 +107,8 @@ class TeamHealthPipeline(Pipeline):
 
     def _count_agent_sessions(self, openclaw_home: Path, agent_id: str,
                               date: str, *,
-                              clawteam_home: Path | None = None) -> int:
+                              clawteam_home: Path | None = None,
+                              qclaw_home: Path | None = None) -> int:
         """Count sessions for an agent on a given date across known layouts."""
         count = 0
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -113,7 +117,7 @@ class TeamHealthPipeline(Pipeline):
         sessions_dir = openclaw_home / "sessions"
         if sessions_dir.exists():
             for path in sessions_dir.iterdir():
-                if not path.is_file():
+                if not path.is_file() or path.suffix != ".jsonl":
                     continue
                 if f"agent:{agent_id}:" not in path.name:
                     continue
@@ -128,7 +132,7 @@ class TeamHealthPipeline(Pipeline):
         agent_sessions_dir = openclaw_home / "agents" / agent_id / "sessions"
         if agent_sessions_dir.exists():
             for path in agent_sessions_dir.iterdir():
-                if not path.is_file():
+                if not path.is_file() or path.suffix != ".jsonl":
                     continue
                 try:
                     mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
@@ -146,7 +150,21 @@ class TeamHealthPipeline(Pipeline):
                 ct_sessions = clawteam_home / "sessions" / raw_id
             if ct_sessions.exists():
                 for path in ct_sessions.iterdir():
-                    if not path.is_file():
+                    if not path.is_file() or path.suffix != ".jsonl":
+                        continue
+                    try:
+                        mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
+                        if mtime == target_date:
+                            count += 1
+                    except OSError:
+                        continue
+
+        # Layout 4: ~/.qclaw/agents/<id>/sessions/*.jsonl
+        if qclaw_home is not None:
+            qclaw_sessions_dir = qclaw_home / "agents" / agent_id / "sessions"
+            if qclaw_sessions_dir.exists():
+                for path in qclaw_sessions_dir.iterdir():
+                    if not path.is_file() or path.suffix != ".jsonl":
                         continue
                     try:
                         mtime = datetime.fromtimestamp(path.stat().st_mtime).date()
@@ -159,7 +177,8 @@ class TeamHealthPipeline(Pipeline):
 
     def _check_memory_logged(self, openclaw_home: Path, agent_id: str,
                              date: str, *,
-                             clawteam_home: Path | None = None) -> bool:
+                             clawteam_home: Path | None = None,
+                             qclaw_home: Path | None = None) -> bool:
         """Check if an agent has a memory file for the given date.
 
         Important: the shared main workspace memory file should only count for the
@@ -185,7 +204,37 @@ class TeamHealthPipeline(Pipeline):
                 clawteam_home / "workspaces" / raw_id / "memory" / f"{date}-*.md",
             ]
 
+        # QClaw memory layouts
+        # Only the main agent may claim qmemory (shared global memory store)
+        if qclaw_home is not None:
+            if agent_id == "main":
+                possible_paths.append(qclaw_home / "qmemory")  # checked specially below
+                possible_paths += [
+                    qclaw_home / "workspace" / "memory" / f"{date}.md",
+                    qclaw_home / "workspace" / "memory" / f"{date}-*.md",
+                ]
+
         for path in possible_paths:
+            # Special handling for qmemory directory (JSON files with updatedAt)
+            if path.name == "qmemory" and path.is_dir():
+                for json_file in path.glob("*.json"):
+                    try:
+                        import json as _json
+                        with open(json_file, encoding="utf-8") as f:
+                            data = _json.load(f)
+                        updated_at = data.get("updatedAt")
+                        if updated_at:
+                            # updatedAt can be int (ms timestamp) or ISO string
+                            if isinstance(updated_at, (int, float)):
+                                ts_date = datetime.fromtimestamp(updated_at / 1000.0).strftime("%Y-%m-%d")
+                            else:
+                                ts_date = str(updated_at)[:10]
+                            if ts_date == date:
+                                return True
+                    except (OSError, ValueError, KeyError):
+                        continue
+                continue
+
             if "*" in path.name:
                 if path.parent.exists() and list(path.parent.glob(path.name)):
                     return True

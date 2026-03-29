@@ -41,13 +41,17 @@ class SelfImprovingPipeline(Pipeline):
 
             # Step 2: New skills installed
             with tracer.span("Scan Skills Installed") as span:
-                skills_added = self._count_new_skills(config.openclaw_home, target_date)
+                skills_added = self._count_new_skills(
+                    config.openclaw_home, target_date,
+                    qclaw_home=config.qclaw_home,
+                )
                 span.set_attribute("skills_added", skills_added)
 
             # Step 3: Memory entries written
             with tracer.span("Scan Memory Entries") as span:
                 memory_entries = self._count_memory_entries(
-                    config.openclaw_home, config.clawteam_home, target_date
+                    config.openclaw_home, config.clawteam_home, target_date,
+                    qclaw_home=config.qclaw_home,
                 )
                 span.set_attribute("memory_entries", memory_entries)
 
@@ -129,8 +133,9 @@ class SelfImprovingPipeline(Pipeline):
 
     # ─── Skills ───────────────────────────────────────────────────────────────
 
-    def _count_new_skills(self, openclaw_home: Path, target_date) -> int:
-        """Count newly created skill directories in OpenClaw skill paths."""
+    def _count_new_skills(self, openclaw_home: Path, target_date, *,
+                          qclaw_home: Path | None = None) -> int:
+        """Count newly created skill directories in OpenClaw and QClaw skill paths."""
         skill_dirs = [
             openclaw_home / "config" / "skills",
             openclaw_home / "skills",
@@ -141,6 +146,15 @@ class SelfImprovingPipeline(Pipeline):
             for sub in workspace_home.iterdir():
                 if sub.is_dir():
                     skill_dirs.append(sub / "skills")
+
+        # QClaw skill paths
+        if qclaw_home is not None:
+            skill_dirs.append(qclaw_home / "skills")
+            qclaw_workspace = qclaw_home / "workspace"
+            if qclaw_workspace.exists():
+                for sub in qclaw_workspace.iterdir():
+                    if sub.is_dir():
+                        skill_dirs.append(sub / "skills")
 
         count = 0
         for base in skill_dirs:
@@ -162,7 +176,8 @@ class SelfImprovingPipeline(Pipeline):
     # ─── Memory ────────────────────────────────────────────────────────────────
 
     def _count_memory_entries(
-        self, openclaw_home: Path, clawteam_home: Path, target_date
+        self, openclaw_home: Path, clawteam_home: Path, target_date, *,
+        qclaw_home: Path | None = None,
     ) -> int:
         """Count memory .md files with today's date in filename or mtime."""
         count = 0
@@ -181,6 +196,32 @@ class SelfImprovingPipeline(Pipeline):
                         continue
                     for memory_dir in [sub / "memory", sub]:
                         count += self._count_in_dir(memory_dir, date_prefix, target_date)
+
+        # QClaw memory locations
+        if qclaw_home is not None and qclaw_home.exists():
+            # Workspace memory .md files
+            for loc in [qclaw_home / "workspace" / "memory"]:
+                if loc.exists():
+                    count += self._count_in_dir(loc, date_prefix, target_date)
+
+            # qmemory JSON entries (each has updatedAt field)
+            qmemory_dir = qclaw_home / "qmemory"
+            if qmemory_dir.exists():
+                for json_file in qmemory_dir.glob("*.json"):
+                    try:
+                        with open(json_file, encoding="utf-8") as f:
+                            data = json.load(f)
+                        updated_at = data.get("updatedAt")
+                        if updated_at:
+                            # updatedAt can be int (ms timestamp) or ISO string
+                            if isinstance(updated_at, (int, float)):
+                                ts_date = datetime.fromtimestamp(updated_at / 1000.0).strftime("%Y-%m-%d")
+                            else:
+                                ts_date = str(updated_at)[:10]
+                            if ts_date == date_prefix:
+                                count += 1
+                    except (OSError, ValueError, KeyError):
+                        continue
 
         return count
 
